@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minha Assessoria de Corrida</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 1rem;
+        }
+        .day-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 0.5rem;
+            min-height: 5rem;
+            cursor: default;
+            border: 1px solid #e5e7eb;
+            transition: all 0.2s;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="flex flex-col items-center justify-center min-h-screen p-4">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-full max-w-2xl text-center">
+            <h1 class="text-3xl sm:text-4xl font-bold mb-4 text-slate-800">Minha Assessoria de Corrida</h1>
+
+            <!-- Abas de navegação -->
+            <div class="flex justify-center mb-6">
+                <button id="daily-view-btn" class="py-2 px-4 rounded-t-lg font-semibold bg-indigo-500 text-white transition-colors duration-200">
+                    Treino do Dia
+                </button>
+                <button id="calendar-view-btn" class="py-2 px-4 rounded-t-lg font-semibold bg-gray-200 text-gray-700 transition-colors duration-200">
+                    Progresso (Calendário)
+                </button>
+            </div>
+
+            <!-- Visualização de Treino Diário -->
+            <div id="training-view" class="bg-indigo-50 p-6 rounded-lg mb-6 text-left">
+                <!-- Conteúdo do treino será injetado aqui pelo JavaScript -->
+            </div>
+
+            <!-- Visualização de Calendário de Progresso -->
+            <div id="calendar-view" class="hidden">
+                <h2 class="text-2xl font-semibold mb-4 text-indigo-800">Calendário de Progresso</h2>
+                <div id="calendar-grid" class="calendar-grid">
+                    <!-- O calendário será injetado aqui -->
+                </div>
+                <div class="mt-8 p-4 bg-indigo-100 rounded-lg shadow-sm">
+                    <h3 class="text-xl font-semibold text-indigo-800 mb-2">Total de KMs</h3>
+                    <div class="flex flex-col sm:flex-row justify-around">
+                        <div>
+                            <p class="text-lg font-bold text-indigo-600">Total Concluído</p>
+                            <p id="total-kms-completed" class="text-3xl font-bold text-indigo-600">0 km</p>
+                        </div>
+                        <div>
+                            <p class="text-lg font-bold text-indigo-600">Total do Plano</p>
+                            <p id="total-kms-plan" class="text-3xl font-bold text-indigo-600">0 km</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Controles de navegação diária -->
+            <div id="daily-nav" class="flex items-center justify-between mb-6">
+                <button id="prev-day-btn" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-full transition-colors duration-200 shadow-md">
+                    Dia Anterior
+                </button>
+                <div class="flex flex-col items-center">
+                    <div class="text-lg font-bold text-slate-700">
+                        Dia <span id="current-day-number"></span>
+                    </div>
+                    <div id="progress-display" class="text-sm font-medium text-green-600 mt-2">
+                        Treinos Completos: 0
+                    </div>
+                </div>
+                <button id="next-day-btn" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-full transition-colors duration-200 shadow-md">
+                    Próximo Dia
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        let db;
+        let auth;
+        let userId;
+
+        // Váriaveis globais e seleção de elementos do DOM
+        const dailyViewBtn = document.getElementById('daily-view-btn');
+        const calendarViewBtn = document.getElementById('calendar-view-btn');
+        const trainingView = document.getElementById('training-view');
+        const calendarView = document.getElementById('calendar-view');
+        const dailyNav = document.getElementById('daily-nav');
+        const prevBtn = document.getElementById('prev-day-btn');
+        const nextBtn = document.getElementById('next-day-btn');
+        const trainingDisplay = document.getElementById('training-view');
+        const currentDayNumber = document.getElementById('current-day-number');
+        const progressDisplay = document.getElementById('progress-display');
+        const calendarGrid = document.getElementById('calendar-grid');
+        const totalKmsCompletedDisplay = document.getElementById('total-kms-completed');
+        const totalKmsPlanDisplay = document.getElementById('total-kms-plan');
+
+        let currentDayIndex = 0;
+        let completedCheckpoints = {};
+        let userNotes = {};
+        let userKms = {};
+
+        // Plano de treino detalhado
+        const trainingPlan = [
+            { day: "Ter 23/09", type: "Corrida leve + técnica", workout: "5 km. Ritmo 7:00–7:30 min/km. Estrutura: 1 km Z1 + 3 km Z2 + 4x100m educativos + 1 km Z1. Foco em postura e respiração.", strengthening: "Prancha (3x 45s), Agachamento (3x 15), Afundo (3x 10 por perna) + core.", performance: "Foco em postura e respiração.", breathing: "Respire fundo e expire lentamente a cada 3 passadas para manter o ritmo.", plannedKm: 5 },
+            { day: "Qua 24/09", type: "Força (academia)", workout: "40 min. Pernas: agachamento, afundo, stiff, panturrilha + core. Prevenção de lesões.", strengthening: "Pernas e core.", performance: "Prevenção de lesões.", breathing: "Não se aplica.", plannedKm: 0 },
+            { day: "Qui 25/09", type: "Intervalado curto", workout: "7 km. Ritmo Z4: 5:40–6:00 min/km. Estrutura: 1 km Z1 + 2 km Z2 + 8x300m Z4 (rec. 200m Z1) + 1 km Z1. Controle no início, intensidade nos tiros.", strengthening: "Elevação de panturrilha (3x 20), Elevação de quadril (3x 15).", performance: "Controle no início, intensidade nos tiros.", breathing: "Pratique a respiração abdominal para maximizar a entrada de oxigênio.", plannedKm: 7 },
+            { day: "Sex 26/09", type: "Recuperação ativa", workout: "30 min. Caminhada leve / bike ergométrica. Desacúmulo de fadiga.", strengthening: "Alongamento estático para quadríceps, isquiotibiais e panturrilhas.", performance: "Desacúmulo de fadiga.", breathing: "Não se aplica.", plannedKm: 0 },
+            { day: "Sáb 27/09", type: "Longão progressivo", workout: "13 km. Ritmo 6:40–7:10 min/km. Estrutura: 2 km Z1 + 8 km Z2 + 2 km Z3 + 1 km Z1. Testar hidratação.", strengthening: "Não se aplica.", performance: "Testar hidratação.", breathing: "Mantenha um padrão de respiração constante, mesmo na subida.", plannedKm: 13 },
+            { day: "Dom 28/09", type: "Liberação e mobilidade", workout: "20 min. Alongamento + rolo miofascial. Relaxamento.", strengthening: "Alongamento + rolo miofascial.", performance: "Relaxamento.", breathing: "Não se aplica.", plannedKm: 0 },
+            { day: "Ter 30/09", type: "Intervalado médio", workout: "7 km. Ritmo Z3: 6:10–6:30 min/km. Estrutura: 1 km Z1 + 2 km Z2 + 5x800m Z3 (rec. 400m Z1) + 1 km Z1. Estímulo ritmo de prova.", strengthening: "Elevação de panturrilha (3x 20), Elevação de quadril (3x 15).", performance: "Estímulo ritmo de prova.", breathing: "Pratique a respiração abdominal para maximizar a entrada de oxigênio.", plannedKm: 7 },
+            { day: "Qui 02/10", type: "Rodagem leve", workout: "6,5 km. Ritmo 6:45–7:15 min/km. Estrutura: 1 km Z1 + 5 km Z2 + 500m Z1. Corrida confortável.", strengthening: "Prancha (3x 45s), Agachamento (3x 15), Afundo (3x 10 por perna) + core.", performance: "Corrida confortável.", breathing: "Respire fundo e inspire pelo nariz e boca, expire pela boca para um melhor fluxo de ar.", plannedKm: 6.5 },
+            { day: "Sáb 04/10", type: "Longão", workout: "15 km. Ritmo 6:40–7:10 min/km. Estrutura: 2 km Z1 + 10 km Z2 + 3 km Z3. Hidratar a cada 30 min.", strengthening: "Não se aplica.", performance: "Hidratar a cada 30 min.", breathing: "Mantenha uma respiração rítmica, como 3 passos inspirando e 2 passos expirando.", plannedKm: 15 },
+            { day: "Ter 07/10", type: "Intervalado forte", workout: "8 km. Ritmo Z4: 5:40–6:00 min/km. Estrutura: 1 km Z1 + 2 km Z2 + 10x400m Z4 (rec. 200m Z1) + 1 km Z1. Alta intensidade, foco em técnica.", strengthening: "Elevação de panturrilha (3x 20), Elevação de quadril (3x 15).", performance: "Alta intensidade, foco em técnica.", breathing: "Pratique a respiração abdominal para maximizar a entrada de oxigênio.", plannedKm: 8 },
+            { day: "Qui 09/10", type: "Rodagem média", workout: "7,5 km. Ritmo 6:40–7:00 min/km. Estrutura: 1 km Z1 + 6 km Z2 + 500m Z1. Ritmo estável.", strengthening: "Prancha (3x 45s), Agachamento (3x 15), Afundo (3x 10 por perna) + core.", performance: "Ritmo estável.", breathing: "Respire fundo e inspire pelo nariz e boca, expire pela boca para um melhor fluxo de ar.", plannedKm: 7.5 },
+            { day: "Sáb 11/10", type: "Longão progressivo", workout: "19 km. Ritmo 6:40–7:10 min/km. Estrutura: 2 km Z1 + 12 km Z2 + 4 km Z3 + 1 km Z1. Simulação parcial de prova.", strengthening: "Não se aplica.", performance: "Simulação parcial de prova.", breathing: "Mantenha uma respiração rítmica, como 3 passos inspirando e 2 passos expirando.", plannedKm: 19 },
+            { day: "Ter 14/10", type: "Intervalado médio", workout: "9 km. Ritmo Z3: 6:10–6:30 min/km. Estrutura: 1 km Z1 + 2 km Z2 + 6x1 km Z3 (rec. 400m Z1) + 1 km Z1. Estímulo de ritmo sustentado.", strengthening: "Elevação de panturrilha (3x 20), Elevação de quadril (3x 15).", performance: "Estímulo de ritmo sustentado.", breathing: "Pratique a respiração abdominal para maximizar a entrada de oxigênio.", plannedKm: 9 },
+            { day: "Qui 16/10", type: "Fartlek", workout: "7 km. Ritmo Z4: 5:50–6:00 min/km. Estrutura: 1 km Z1 + 5 km alternando (1 min Z4 / 2 min Z2) + 1 km Z1. Lúdico, melhora resposta ao ritmo.", strengthening: "Prancha (3x 45s), Agachamento (3x 15), Afundo (3x 10 por perna) + core.", performance: "Melhora resposta ao ritmo.", breathing: "Respire fundo e inspire pelo nariz e boca, expire pela boca para um melhor fluxo de ar.", plannedKm: 7 },
+            { day: "Sáb 18/10", type: "Longão", workout: "19 km. Ritmo 6:35–7:00 min/km. Estrutura: 2 km Z1 + 14 km Z2 + 3 km Z3. Preparação forte de endurance.", strengthening: "Não se aplica.", performance: "Preparação forte de endurance.", breathing: "Mantenha uma respiração rítmica, como 3 passos inspirando e 2 passos expirando.", plannedKm: 19 },
+            { day: "Ter 21/10", type: "Intervalado curto", workout: "9 km. Ritmo Z4: 5:40–6:00 min/km. Estrutura: 1 km Z1 + 2 km Z2 + 12x400m Z4 (rec. 200m Z1) + 1 km Z1. Última semana de tiros fortes.", strengthening: "Elevação de panturrilha (3x 20), Elevação de quadril (3x 15).", performance: "Última semana de tiros fortes.", breathing: "Pratique a respiração abdominal para maximizar a entrada de oxigênio.", plannedKm: 9 },
+            { day: "Qui 23/10", type: "Rodagem regenerativa", workout: "7 km. Ritmo 6:45–7:15 min/km. Estrutura: 1 km Z1 + 5 km Z2 + 1 km Z1. Muito leve.", strengthening: "Prancha (3x 45s), Agachamento (3x 15), Afundo (3x 10 por perna) + core.", performance: "Muito leve.", breathing: "Respire fundo e inspire pelo nariz e boca, expire pela boca para um melhor fluxo de ar.", plannedKm: 7 },
+            { day: "Sáb 25/10", type: "Longão simulado", workout: "22 km. Ritmo 6:35–7:00 min/km. Estrutura: 2 km Z1 + 15 km Z2 + 5 km Z3. Treino mais importante do ciclo.", strengthening: "Não se aplica.", performance: "Treino mais importante do ciclo.", breathing: "Mantenha uma respiração rítmica, como 3 passos inspirando e 2 passos expirando.", plannedKm: 22 },
+            { day: "Ter 28/10", type: "Intervalado médio", workout: "8 km. Ritmo Z3: 6:10–6:30 min/km. Estrutura: 1 km Z1 + 2 km Z2 + 4x1,2 km Z3 (rec. 400m Z1) + 1 km Z1. Redução de volume, mantém intensidade.", strengthening: "Elevação de panturrilha (3x 20), Elevação de quadril (3x 15).", performance: "Redução de volume, mantém intensidade.", breathing: "Pratique a respiração abdominal para maximizar a entrada de oxigênio.", plannedKm: 8 },
+            { day: "Qui 30/10", type: "Rodagem leve", workout: "6 km. Ritmo 6:45–7:15 min/km. Estrutura: 1 km Z1 + 4 km Z2 + 1 km Z1. Corrida leve.", strengthening: "Prancha (3x 45s), Agachamento (3x 15), Afundo (3x 10 por perna) + core.", performance: "Corrida leve.", breathing: "Respire fundo e inspire pelo nariz e boca, expire pela boca para um melhor fluxo de ar.", plannedKm: 6 },
+            { day: "Sáb 01/11", type: "Longão leve", workout: "15 km. Ritmo 6:45–7:15 min/km. Estrutura: 2 km Z1 + 12 km Z2 + 1 km Z1. Sem forçar, foco em técnica.", strengthening: "Não se aplica.", performance: "Sem forçar, foco em técnica.", breathing: "Mantenha uma respiração rítmica, como 3 passos inspirando e 2 passos expirando.", plannedKm: 15 },
+            { day: "Ter 04/11", type: "Corrida leve", workout: "3–4 km. Ritmo 7:00–7:30 min/km. Estrutura: 1 km Z1 + 2 km Z1/Z2 + 500m Z1. Liberação diária.", strengthening: "Prancha (3x 45s), Agachamento (3x 15), Afundo (3x 10 por perna) + core.", performance: "Liberação diária.", breathing: "Respire fundo e inspire pelo nariz e boca, expire pela boca para um melhor fluxo de ar.", plannedKm: 3.5 },
+            { day: "Qua 05/11", type: "Corrida leve", workout: "3 km. Ritmo 7:00–7:30 min/km. Estrutura: 1 km Z1 + 1 km Z1/Z2 + 1 km Z1. Soltar pernas.", strengthening: "Alongamento estático para quadríceps, isquiotibiais e panturrilhas.", performance: "Soltar pernas.", breathing: "Não se aplica.", plannedKm: 3 },
+            { day: "Qui 06/11", type: "Corrida média", workout: "4–5 km. Ritmo 6:30–7:00 min/km. Estrutura: 1 km Z1 + 3 km Z2 + 1 km Z3 leve. Último estímulo moderado.", strengthening: "Elevação de panturrilha (3x 20), Elevação de quadril (3x 15).", performance: "Último estímulo moderado.", breathing: "Pratique a respiração abdominal para maximizar a entrada de oxigênio.", plannedKm: 4.5 },
+            { day: "Sex 07/11", type: "Força leve", workout: "20 min. Circuito leve: core, panturrilha, glúteo. Liberação diária.", strengthening: "Core, panturrilha, glúteo.", performance: "Liberação diária.", breathing: "Não se aplica.", plannedKm: 0 },
+            { day: "Sáb 08/11", type: "Corrida longa", workout: "10 km. Ritmo 6:40–7:00 min/km. Estrutura: 2 km Z1 + 6 km Z2 + 2 km Z3. Ritmo de prova nos últimos km.", strengthening: "Não se aplica.", performance: "Ritmo de prova nos últimos km.", breathing: "Mantenha uma respiração rítmica, como 3 passos inspirando e 2 passos expirando.", plannedKm: 10 },
+            { day: "Dom 09/11", type: "Recuperação ativa", workout: "20–30 min. Caminhada leve ou yoga. Relaxamento.", strengthening: "Alongamento + rolo miofascial.", performance: "Relaxamento.", breathing: "Não se aplica.", plannedKm: 0 },
+            { day: "Ter 11/11", type: "Corrida leve", workout: "4 km. Ritmo 7:00–7:30 min/km. Estrutura: 1 km Z1 + 2 km Z2 leve + 1 km Z1. Muito leve.", strengthening: "Prancha (3x 45s), Agachamento (3x 15), Afundo (3x 10 por perna) + core.", performance: "Muito leve.", breathing: "Respire fundo e inspire pelo nariz e boca, expire pela boca para um melhor fluxo de ar.", plannedKm: 4 },
+            { day: "Qui 13/11", type: "Rodagem curta", workout: "3 km. Ritmo 6:45–7:15 min/km. Estrutura: 500m Z1 + 2 km Z2 + 500m Z1. Só para soltar as pernas.", strengthening: "Elevação de panturrilha (3x 20), Elevação de quadril (3x 15).", performance: "Só para soltar as pernas.", breathing: "Pratique a respiração abdominal para maximizar a entrada de oxigênio.", plannedKm: 3 },
+            { day: "Sáb 15/11", type: "Descanso total", workout: "Dia de descanso. Alongamento leve. Hidratar bem.", strengthening: "Alongamento leve.", performance: "Hidratar bem.", breathing: "Não se aplica.", plannedKm: 0 },
+            { day: "Dom 16/11", type: "MEIA MARATONA", workout: "21,1 km. Ritmo médio 6:30–6:50 min/km. Estrutura: 2 km Z1/Z2 + 5 km Z2 + 10 km Z2/Z3 + 3 km Z3 + 1 km Z4 final. Estratégia de prova, foco em constância.", strengthening: "Não se aplica.", performance: "Estratégia de prova, foco em constância.", breathing: "Mantenha uma respiração rítmica, como 3 passos inspirando e 2 passos expirando.", plannedKm: 21.1 }
+        ];
+        
+        const totalPlannedKms = trainingPlan.reduce((sum, day) => sum + day.plannedKm, 0);
+
+        // --- Funções Principais ---
+
+        function initializeFirebase() {
+            try {
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                if (typeof __initial_auth_token !== 'undefined') {
+                    signInWithCustomToken(auth, __initial_auth_token).then((userCredential) => {
+                        userId = userCredential.user.uid;
+                        setupListeners();
+                    }).catch((error) => {
+                        console.error("Erro ao autenticar com token personalizado:", error);
+                        signInAnonymously(auth).then((userCredential) => {
+                            userId = userCredential.user.uid;
+                            setupListeners();
+                        }).catch((error) => {
+                            console.error("Erro na autenticação anônima:", error);
+                        });
+                    });
+                } else {
+                    signInAnonymously(auth).then((userCredential) => {
+                        userId = userCredential.user.uid;
+                        setupListeners();
+                    }).catch((error) => {
+                        console.error("Erro na autenticação anônima:", error);
+                    });
+                }
+            } catch (e) {
+                console.error("Erro ao inicializar o Firebase:", e);
+            }
+        }
+
+        function setupListeners() {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const checkpointsCollection = collection(db, `artifacts/${appId}/users/${userId}/checkpoints`);
+            const notesCollection = collection(db, `artifacts/${appId}/users/${userId}/notes`);
+            const kmsCollection = collection(db, `artifacts/${appId}/users/${userId}/kms`);
+
+            // Listener para checkpoints
+            onSnapshot(checkpointsCollection, (snapshot) => {
+                completedCheckpoints = {};
+                snapshot.forEach(doc => {
+                    completedCheckpoints[doc.id] = true;
+                });
+                updateProgressDisplay();
+                renderViews();
+            }, (error) => {
+                console.error("Erro ao obter checkpoints:", error);
+            });
+
+            // Listener para notas
+            onSnapshot(notesCollection, (snapshot) => {
+                userNotes = {};
+                snapshot.forEach(doc => {
+                    userNotes[doc.id] = doc.data().note;
+                });
+                renderViews();
+            }, (error) => {
+                console.error("Erro ao obter notas:", error);
+            });
+            
+            // Listener para KMs
+            onSnapshot(kmsCollection, (snapshot) => {
+                userKms = {};
+                let total = 0;
+                snapshot.forEach(doc => {
+                    userKms[doc.id] = doc.data().km;
+                });
+                renderViews();
+            }, (error) => {
+                console.error("Erro ao obter KMs:", error);
+            });
+        }
+        
+        function updateProgressDisplay() {
+            if (progressDisplay) {
+                const count = Object.keys(completedCheckpoints).length;
+                progressDisplay.textContent = `Treinos Completos: ${count}`;
+            }
+        }
+
+        function toggleCheckpoint(index) {
+            if (!userId) {
+                console.error("Usuário não autenticado. Não é possível salvar o progresso.");
+                return;
+            }
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const checkpointRef = doc(db, `artifacts/${appId}/users/${userId}/checkpoints`, String(index));
+            if (completedCheckpoints[index]) {
+                setDoc(checkpointRef, { completed: false, timestamp: new Date() }).then(() => {
+                }).catch(error => {
+                    console.error("Erro ao remover checkpoint:", error);
+                });
+            } else {
+                setDoc(checkpointRef, { completed: true, timestamp: new Date() }).then(() => {
+                }).catch(error => {
+                    console.error("Erro ao salvar checkpoint:", error);
+                });
+            }
+        }
+
+        function saveNote(index, note) {
+            if (!userId) {
+                console.error("Usuário não autenticado. Não é possível salvar a nota.");
+                return;
+            }
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const noteRef = doc(db, `artifacts/${appId}/users/${userId}/notes`, String(index));
+            setDoc(noteRef, { note: note, timestamp: new Date() }).then(() => {
+                console.log("Nota salva com sucesso!");
+            }).catch(error => {
+                console.error("Erro ao salvar nota:", error);
+            });
+        }
+        
+        function saveKm(index, km) {
+            if (!userId) {
+                console.error("Usuário não autenticado. Não é possível salvar KM.");
+                return;
+            }
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const kmRef = doc(db, `artifacts/${appId}/users/${userId}/kms`, String(index));
+            setDoc(kmRef, { km: parseFloat(km) || 0, timestamp: new Date() }).then(() => {
+                console.log("KM salvo com sucesso!");
+            }).catch(error => {
+                console.error("Erro ao salvar KM:", error);
+            });
+        }
+
+        function renderViews() {
+            if (!trainingView.classList.contains('hidden')) {
+                renderTraining();
+            }
+            if (!calendarView.classList.contains('hidden')) {
+                renderCalendar();
+            }
+        }
+
+        function renderTraining() {
+            if (currentDayIndex < 0 || currentDayIndex >= trainingPlan.length) {
+                if (trainingDisplay) {
+                    trainingDisplay.innerHTML = `<h2 class="text-2xl font-semibold text-center text-indigo-800">Plano de treino indisponível.</h2>`;
+                }
+                if (currentDayNumber) {
+                    currentDayNumber.textContent = "N/A";
+                }
+                return;
+            }
+
+            const day = trainingPlan[currentDayIndex];
+            
+            const isCompleted = completedCheckpoints[currentDayIndex];
+            const checkpointColor = isCompleted ? 'bg-green-500' : 'bg-gray-300';
+            const checkIcon = isCompleted ? 
+                `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                </svg>` : '';
+
+            // Generate dropdown options
+            let dayOptions = '';
+            trainingPlan.forEach((plan, index) => {
+                dayOptions += `<option value="${index}" ${index === currentDayIndex ? 'selected' : ''}>Dia ${index + 1}: ${plan.day}</option>`;
+            });
+            
+            const content = `
+                <div class="flex flex-col sm:flex-row items-center justify-between mb-4">
+                    <h2 class="text-2xl font-semibold text-indigo-800 hidden sm:block">Treino do Dia</h2>
+                    <select id="day-selector" class="w-full sm:w-auto p-2 rounded-md border border-gray-300 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        ${dayOptions}
+                    </select>
+                    <button id="checkpoint-btn" class="mt-4 sm:mt-0 w-10 h-10 ${checkpointColor} rounded-full flex items-center justify-center shadow-md hover:scale-110 transition-transform duration-200">
+                        ${checkIcon}
+                    </button>
+                </div>
+                <h3 class="text-lg font-medium mb-4 text-indigo-600">${day.type}</h3>
+                
+                <div class="mb-4">
+                    <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Treino do Dia</h4>
+                    <p class="text-slate-600">${day.workout}</p>
+                </div>
+
+                <div class="mb-4">
+                    <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">KMs Realizados</h4>
+                    <input type="number" id="kms-input" class="w-full p-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Digite os KMs aqui..." value="${userKms[currentDayIndex] !== undefined ? userKms[currentDayIndex] : ''}">
+                </div>
+                
+                <div class="mb-4">
+                    <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Fortalecimento</h4>
+                    <p class="text-slate-600">${day.strengthening}</p>
+                </div>
+                
+                <div class="mb-4">
+                    <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Performance & Resistência</h4>
+                    <p class="text-slate-600">${day.performance}</p>
+                </div>
+                
+                <div class="mb-4">
+                    <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Técnica de Respiração</h4>
+                    <p class="text-slate-600">${day.breathing}</p>
+                </div>
+
+                <div>
+                    <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-1">Minhas Observações</h4>
+                    <textarea id="notes-input" class="w-full h-24 p-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Anote aqui como foi o seu treino..."></textarea>
+                </div>
+            `;
+            if (trainingDisplay) {
+                trainingDisplay.innerHTML = content;
+                const checkpointBtn = document.getElementById('checkpoint-btn');
+                if (checkpointBtn) {
+                    checkpointBtn.addEventListener('click', () => {
+                        toggleCheckpoint(currentDayIndex);
+                    });
+                }
+                const notesInput = document.getElementById('notes-input');
+                if (notesInput) {
+                    notesInput.value = userNotes[currentDayIndex] || '';
+                    notesInput.addEventListener('input', () => {
+                        saveNote(currentDayIndex, notesInput.value);
+                    });
+                }
+                const kmsInput = document.getElementById('kms-input');
+                if (kmsInput) {
+                    kmsInput.value = userKms[currentDayIndex] !== undefined ? userKms[currentDayIndex] : '';
+                    kmsInput.addEventListener('input', (e) => {
+                        saveKm(currentDayIndex, e.target.value);
+                    });
+                }
+                const daySelector = document.getElementById('day-selector');
+                if(daySelector) {
+                    daySelector.addEventListener('change', (e) => {
+                        currentDayIndex = parseInt(e.target.value, 10);
+                        renderTraining();
+                    });
+                }
+            }
+        }
+
+        function renderCalendar() {
+            let calendarHtml = '';
+            let totalCompletedKms = 0;
+            trainingPlan.forEach((day, index) => {
+                const isCompleted = completedCheckpoints[index];
+                const dayColor = isCompleted ? 'bg-green-100' : 'bg-white';
+                const textColor = isCompleted ? 'text-green-800' : 'text-slate-800';
+                const kmText = userKms[index] !== undefined ? `${userKms[index]} km` : '';
+                
+                if (isCompleted && userKms[index] !== undefined) {
+                    totalCompletedKms += parseFloat(userKms[index]);
+                }
+                
+                const checkIcon = isCompleted ? 
+                    `<div class="mt-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-white" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                        </svg>
+                    </div>` : '';
+
+                calendarHtml += `
+                    <div class="day-box rounded-lg shadow-sm ${dayColor}">
+                        <span class="text-lg font-bold ${textColor}">${index + 1}</span>
+                        <span class="text-xs text-gray-500">${day.day.split(' ')[0]}</span>
+                        ${kmText ? `<div class="text-xs text-gray-500 mt-1">${kmText}</div>` : ''}
+                        ${checkIcon}
+                    </div>
+                `;
+            });
+            if (calendarGrid) {
+                calendarGrid.innerHTML = calendarHtml;
+            }
+            if (totalKmsCompletedDisplay) {
+                totalKmsCompletedDisplay.textContent = `${totalCompletedKms.toFixed(1)} km`;
+            }
+            if (totalKmsPlanDisplay) {
+                totalKmsPlanDisplay.textContent = `${totalPlannedKms.toFixed(1)} km`;
+            }
+        }
+
+        // --- Event Listeners ---
+        dailyViewBtn.addEventListener('click', () => {
+            dailyViewBtn.classList.add('bg-indigo-500', 'text-white');
+            dailyViewBtn.classList.remove('bg-gray-200', 'text-gray-700');
+            calendarViewBtn.classList.remove('bg-indigo-500', 'text-white');
+            calendarViewBtn.classList.add('bg-gray-200', 'text-gray-700');
+
+            trainingView.classList.remove('hidden');
+            dailyNav.classList.remove('hidden');
+            calendarView.classList.add('hidden');
+            renderTraining();
+        });
+
+        calendarViewBtn.addEventListener('click', () => {
+            calendarViewBtn.classList.add('bg-indigo-500', 'text-white');
+            calendarViewBtn.classList.remove('bg-gray-200', 'text-gray-700');
+            dailyViewBtn.classList.remove('bg-indigo-500', 'text-white');
+            dailyViewBtn.classList.add('bg-gray-200', 'text-gray-700');
+
+            trainingView.classList.add('hidden');
+            dailyNav.classList.add('hidden');
+            calendarView.classList.remove('hidden');
+            renderCalendar();
+        });
+
+        prevBtn.addEventListener('click', () => {
+            currentDayIndex = (currentDayIndex - 1 + trainingPlan.length) % trainingPlan.length;
+            renderTraining();
+        });
+
+        nextBtn.addEventListener('click', () => {
+            currentDayIndex = (currentDayIndex + 1) % trainingPlan.length;
+            renderTraining();
+        });
+
+        window.onload = () => {
+            renderTraining();
+            initializeFirebase();
+        };
+    </script>
+</body>
+</html>
