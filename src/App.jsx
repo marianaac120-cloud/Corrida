@@ -53,9 +53,15 @@ export default function App() {
 
     try {
       await sendToGoogleSheets(payload);
-      await sendReservationEmail(payload);
       setReservationData(payload);
-      setSuccess('Reserva criada com sucesso! Confira os dados de pagamento abaixo.');
+
+      try {
+        await sendReservationEmail(payload);
+        setSuccess('Reserva criada com sucesso! Confira os dados de pagamento abaixo.');
+      } catch (emailError) {
+        console.error('[App] Erro no envio de e-mail após reserva:', emailError);
+        setSuccess('Reserva registrada. Não conseguimos enviar o e-mail, mas seu ingresso foi gerado na tela.');
+      }
     } catch (err) {
       console.error('[App] Erro no fluxo de reserva:', err);
       setError('Não foi possível concluir a reserva. Verifique os dados e tente novamente.');
@@ -79,9 +85,15 @@ export default function App() {
 
     try {
       await sendToGoogleSheets(updatePayload);
-      await sendReservationEmail(updatePayload);
       setReservationData(updatePayload);
-      setSuccess('Segunda parcela informada com sucesso!');
+
+      try {
+        await sendReservationEmail(updatePayload);
+        setSuccess('Segunda parcela informada com sucesso!');
+      } catch (emailError) {
+        console.error('[App] Erro no envio de e-mail da segunda parcela:', emailError);
+        setSuccess('Reserva registrada. Não conseguimos enviar o e-mail, mas seu ingresso foi gerado na tela.');
+      }
     } catch (err) {
       console.error('[App] Erro ao informar segunda parcela:', err);
       setError('Erro ao informar segunda parcela. Tente novamente em instantes.');

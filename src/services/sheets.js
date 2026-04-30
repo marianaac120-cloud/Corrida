@@ -4,31 +4,14 @@ export async function sendToGoogleSheets(payload) {
   console.log('[Sheets] Preparando envio para planilha:', payload);
 
   try {
-    const response = await fetch(APPS_SCRIPT_ENDPOINT, {
+    await fetch(APPS_SCRIPT_ENDPOINT, {
       method: 'POST',
-      mode: 'cors',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
+      mode: 'no-cors',
       body: JSON.stringify(payload),
     });
 
-    const rawText = await response.text();
-    console.log('[Sheets] Resposta bruta do Apps Script:', rawText);
-
-    if (!response.ok) {
-      throw new Error(`Falha HTTP no Apps Script: ${response.status}`);
-    }
-
-    let data;
-    try {
-      data = JSON.parse(rawText);
-    } catch {
-      data = { message: rawText };
-    }
-
-    console.log('[Sheets] Envio concluído:', data);
-    return data;
+    console.log('[Sheets] Envio disparado para Apps Script');
+    return { ok: true };
   } catch (error) {
     console.error('[Sheets] Erro ao enviar para planilha:', error);
     throw error;

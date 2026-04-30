@@ -6,22 +6,21 @@ const PUBLIC_KEY = 'SmFWKdwphC5jYz4eN';
 
 export async function sendReservationEmail(payload) {
   const templateParams = {
-    buyer_name: payload.nome,
-    buyer_email: payload.email,
+    to_email: payload.email,
+    to_name: payload.nome,
     event_name: 'Mabrina #3 edição',
     ticket_type: payload.ingresso,
     quantity: payload.quantidade,
-    total_price: payload.valor_total,
+    total_value: payload.valor_total,
     first_installment: payload.valor_primeira_parcela,
     second_installment: payload.valor_segunda_parcela,
+    ticket_code: payload.codigo_ingresso,
     pix_code: payload.pix_codigo,
     nubank_link: payload.nubank_link,
-    ticket_code: payload.codigo_ingresso,
-    payment_status: payload.status,
-    deadline_notice: 'A segunda parcela deve ser paga até 15/05',
+    status: payload.status,
   };
 
-  console.log('[EmailJS] Preparando envio de e-mail:', templateParams);
+  console.log('[EmailJS] Objeto enviado para o template:', templateParams);
 
   try {
     const result = await emailjs.send(SERVICE_ID, TEMPLATE_ID, templateParams, PUBLIC_KEY);
